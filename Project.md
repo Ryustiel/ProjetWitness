@@ -39,6 +39,7 @@ Deux catégories d'employés ont été créées avec des horaires distincts pour
 NOTE : Le déchargement ne nécessite pas de ressources car on considère que c'est l'équipe du camion poubelle
 lui même qui se charge de décharger leur camion dans la décharge.
 De même pour le poste de chargement, il s'agit du camioneur qui vient récupérer ses palettes.
+Mais pour le chargement il y a quand même 20 minutes que passe un employé pour préparer les palettes (phase setup).
 
 #### B. Techniciens de Maintenance
 *   **Ressource :** `TechnicienMaintenance`
@@ -354,6 +355,24 @@ VStockPoidsActuel(1) = VStockPoidsActuel(1) - PoidsDechet
 
 ! Pour simuler le temps d'arrivée d'un camion de livraison
 Uniform(20,2000)
+
+### Réglage
+
+Un opérateur doit être présent initialement pour assembler la palette.
+Il y a ensuite un temps de traitement qui correspond à l'appel d'un camion,
+son arrivée et le chargement de la palette.
+
+*   **Dissociation Tâche Humaine / Temps Machine (Via l'onglet Réglage) :**
+    *   **Choix :** Nous avons déplacé les 20 minutes d'intervention humaine dans l'onglet **Réglage (Setup)** plutôt que dans le temps de cycle global.
+    *   **Pourquoi ?** Si l'opérateur était assigné au *Cycle*, il resterait "bloqué" virtuellement pendant tout le trajet du camion (temps défini par la loi `Uniform`). En utilisant le *Réglage*, l'opérateur est mobilisé uniquement pour les 20 minutes de chargement, puis est libéré pour retourner au tri pendant que le camion effectue sa rotation autonome.
+
+*   **Gestion de l'Urgence (Priorité = 2) :**
+    *   **Choix :** La priorité a été rendue plus forte que celle du Poste de Tri.
+    *   **Pourquoi ?** Les ressources `OperateurTri` sont partagées. Sans ce réglage, les opérateurs continueraient de trier indéfiniment tant qu'il y a des déchets, ignorant les camions en attente. Ce paramétrage force l'opérateur à quitter le poste de tri dès qu'une expédition est prête, garantissant la fluidité des sorties.
+
+*   **Forçage Systématique (Opérations avant 1er réglage = 0) :**
+    *   **Choix :** Le réglage est configuré pour se déclencher toutes les **1** opérations, avec un "Nbre d'opérations au 1er réglage" à **0**.
+    *   **Pourquoi ?** Par défaut, WITNESS peut interpréter le réglage comme un changement de série. Ce paramétrage contraint le logiciel à considérer ce temps de chargement comme une étape obligatoire pour **chaque** palette, y compris la toute première de la simulation.
 
 ### Initialisation de VSeuilExpedition
 
