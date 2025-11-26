@@ -1,6 +1,69 @@
 
 Résumé de ce qui a été implémenté :
 
+# A priori
+
+On représente par un article un groupe de déchets qui occupe un certain volume.
+La propriété poids représente le poids cumulé de ce volume unitaire de déchets.
+C'est pour ça qu'on utilise le nombre d'article fixe pour la décharge (qui est à même le sol)
+et pour le shipping, alors qu'on a également une limite de poids (en plus du volume) pour le 
+stockage de tri car dans notre facility il est placé dans des bennes spéciales qui ont une charge limite.
+
+## Gestion des Arrivées & Ressources Humaines
+
+Afin de rendre le modèle plus réaliste, des profils d'arrivée variables ont été configurés pour les camions et des plannings de travail ont été créés pour le personnel.
+
+### 1. Profil d'arrivée des Camions Poubelle
+L'arrivée des camions n'est plus constante. Elle suit désormais un **Profil d'arrivée (Arrival Profile)** défini sur une base de 24h, configuré via l'interface graphique (voir capture) pour simuler les tournées de collecte.
+
+**Configuration du cycle (Heure de début | Durée | Inter-arrivée) :**
+*   **00:00 - 05:00 (Nuit)** : Durée 300 min $\rightarrow$ Quantité **0** (Aucune arrivée).
+*   **05:00 - 11:00 (Matin)** : Durée 360 min $\rightarrow$ 1 camion toutes les **20** min.
+*   **11:00 - 13:00 (Midi)** : Durée 120 min $\rightarrow$ 1 camion toutes les **2** min (Pic d'activité).
+*   **13:00 - 16:00 (Après-midi)** : Durée 180 min $\rightarrow$ 1 camion toutes les **12** min.
+*   **16:00 - 00:00 (Soir)** : Durée 480 min $\rightarrow$ 1 camion toutes les **5** min.
+
+### 2. Gestion du Personnel (Labor & Shifts)
+Deux catégories d'employés ont été créées avec des horaires distincts pour couvrir les besoins de tri et de maintenance.
+
+#### A. Opérateurs de Tri
+*   **Ressource :** `OperateurTri`
+*   **Rôle :** Assurent le fonctionnement du poste de tri et la maintenance mineure.
+*   **Planning associé :** `PlanningOperateurTri`
+*   **Séquence de travail (en minutes) :**
+    1.  **300** Travail (5h)
+    2.  **60** Pause
+    3.  **300** Travail (5h)
+    4.  **780** Repos (Fin de journée)
+
+NOTE : Le déchargement ne nécessite pas de ressources car on considère que c'est l'équipe du camion poubelle
+lui même qui se charge de décharger leur camion dans la décharge.
+De même pour le poste de chargement, il s'agit du camioneur qui vient récupérer ses palettes.
+
+#### B. Techniciens de Maintenance
+*   **Ressource :** `TechnicienMaintenance`
+*   **Rôle :** Dédiés aux pannes majeures (ex: Incinérateur).
+*   **Planning associé :** `PlanningTechnicien`
+*   **Séquence de travail (en minutes) :**
+    1.  **180** Travail (3h)
+    2.  **60** Pause
+    3.  **180** Travail (3h)
+    4.  **1020** Repos (Fin de journée)
+
+# Simulations
+
+## Camion Poubelle
+
+### Actions à la Création
+
+LENGTH = 3
+WIDTH = 1
+HEIGHT = 1.25
+PoidsCamion = Triangle (20,100,300) ! Triangle (400,5500,8000)
+
+### Loi de Sortie
+
+PUSH to ParkingPoubelle(1)
 
 ## Machine Déchargement
 
@@ -74,13 +137,25 @@ ENDIF
 
 ### Loi de Sortie
 
-IF M = 1
-	! Le premier élément est la pièce d'entrée (camion poubelle)
-	! On l'envoie au SCRAP pour symboliser qu'il n'a plus d'usage
-	PUSH to SCRAP
-ELSE 
-	! Envoie à la décharge si la pile est pleine
-	PUSH to Pile,Décharge
+IF M = 1  ! Premier élément = camion vide
+    ! Le camion vide part au rebut
+    PUSH to SCRAP
+ELSE
+    ! --- Logique de restriction par Poids ---
+    
+    ! On vérifie si l'ajout de CE déchet fera déborder la pile
+    IF (VPoidsPileActuel + PoidsDechet) <= VCapacitePileMax
+        
+        ! Il y a de la place en poids : On tente la Pile en priorité.
+        ! Si la Pile est pleine en nombre de pièces,
+        ! la règle standard "Pile, Décharge" enverra à la Décharge.
+        PUSH to Pile, Décharge
+        
+    ELSE
+        ! La Pile est trop lourde : Déroutement immédiat vers la Décharge
+        ! (Ceci simule une zone de tri saturée)
+        PUSH to Décharge
+    ENDIF
 ENDIF
 
 ### Note
@@ -88,6 +163,16 @@ ENDIF
 Machine configurée en production
 
 Problème Résolu : La machine output le camion poubelle lui même (car c'est une pièce en entrée) ce qui n'est pas correct. Dans la loi de sortie, on a défini un envoi au Scrap de la valeur M=1.
+
+## Pile de Traitement
+
+### Capacité
+
+Possède une capacité en nombre d'éléments (200) qu'on peut faire correspondre à un volume
+et une capacité en Masse (lié à des contraintes de stabilité) symbolisée par les variables :
+
+VCapacitePileMax = 1000.0
+et VPoidsPileActuel
 
 ## Poste de Tri
 
@@ -98,14 +183,43 @@ PULL from Pile
 ### Loi de Sortie
 
 IF TypeDechetE = 1
-	PUSH to StockCarton,Décharge
+! Si le poids actuel + le poids de la pièce < Max, on stocke (si la capacité du stock n'est pas atteinte aussi)
+	IF VStockPoidsActuel(1) + PoidsDechet <= VStockCapaciteMax(1)
+		PUSH to StockCarton,Décharge
+	ELSE 
+! Sinon Décharge
+		PUSH to Décharge
+	ENDIF
 ELSEIF TypeDechetE = 2
-	PUSH to StockPlastique,Décharge
+	IF VStockPoidsActuel(2) + PoidsDechet <= VStockCapaciteMax(2)
+		PUSH to StockPlastique,Décharge
+	ELSE 
+		PUSH to Décharge
+	ENDIF
 ELSE 
-	PUSH to StockOrganique,Décharge
+	 ! REGLE IMPORTANTE : Maintien du feu de l'incinérateur
+    ! Si le nombre de pièces dans la décharge est inférieur à 5% de sa capacité totale
+    IF NPARTS(Décharge) < (0.05 * VCapaciteDecharge)
+        
+        ! On force l'envoi vers la décharge pour alimenter l'incinérateur
+        PUSH to Décharge
+        
+    ELSE
+        ! Sinon, fonctionnement normal (Stockage ou Décharge si stock plein)
+        IF VStockPoidsActuel(3) + PoidsDechet <= VStockCapaciteMax(3)
+            PUSH to StockOrganique, Décharge
+        ELSE 
+            PUSH to Décharge
+        ENDIF
+    ENDIF
 ENDIF
 
 ## Incinérateur
+
+### VCapaciteDecharge
+
+VCapaciteDecharge = 200
+! Permet de calculer les seuils de passage en fonctionnement rapide
 
 ### Loi d'Entrée
 
@@ -119,7 +233,7 @@ DIM vCoefPollutionMode AS REAL
 DIM vEnergieLot AS REAL
 DIM vPollutionLot AS REAL
 
-! --- 1. GESTION DU MODE DE FONCTIONNEMENT (HYSTÉRÉSIS) ---
+! --- 1. GESTION DU MODE DE FONCTIONNEMENT ---
 
 ! Calcul du taux de remplissage actuel de la décharge
 vTauxRemplissage = NPARTS(Décharge) / VCapaciteDecharge
@@ -225,4 +339,94 @@ VStockCapaciteMax(1) = 500.0  ! 5 Tonnes max pour Carton
 VStockCapaciteMax(2) = 300.0  ! 3 Tonnes max pour Plastique
 VStockCapaciteMax(3) = 800.0  ! 8 Tonnes max pour Organique
 
+### Action en Entrée pour chaque Stock
 
+! En utilisant l'index approprié (1 pour Carton)
+VStockPoidsActuel(1) = VStockPoidsActuel(1) + PoidsDechet
+
+### Action en Sortie pour chaque Stock
+
+VStockPoidsActuel(1) = VStockPoidsActuel(1) - PoidsDechet
+
+## Chargement
+
+### Temps de Cycle
+
+! Pour simuler le temps d'arrivée d'un camion de livraison
+Uniform(20,2000)
+
+### Initialisation de VSeuilExpedition
+
+! Seuil pour qu'un camion vienne chercher la marchandise (ex: groupe de 20 objets)
+VSeuilExpedition = 20
+
+### Initialisation de VTabPrixVente
+
+! --- Initialisation des Prix de Vente (€/kg) ---
+! Type 1 : Carton (env. 100€/tonne -> 0.10/kg)
+VTabPrixVente(1) = 0.10
+
+! Type 2 : Plastique (env. 300€/tonne -> 0.30/kg)
+VTabPrixVente(2) = 0.30
+
+! Type 3 : Organique (env. 20€/tonne -> 0.02/kg pour compost/méthanisation)
+VTabPrixVente(3) = 0.02
+
+### Loi d'Entrée
+
+IF NPARTS(Chargement) = 0
+    ! DÉCISION
+    ! On ne lance un camion que si un stock atteint le Seuil d'Expédition
+    ! Et on choisit le plus rempli parmi ceux qui dépassent ce seuil.
+
+    IF NPARTS(StockCarton) >= VSeuilExpedition AND NPARTS(StockCarton) >= NPARTS(StockPlastique) AND NPARTS(StockCarton) >= NPARTS(StockOrganique)
+        PULL from StockCarton
+    ELSEIF NPARTS(StockPlastique) >= VSeuilExpedition AND NPARTS(StockPlastique) >= NPARTS(StockOrganique)
+        PULL from StockPlastique
+    ELSEIF NPARTS(StockOrganique) >= VSeuilExpedition
+        PULL from StockOrganique
+    ELSE
+        WAIT
+    ENDIF
+
+ELSE
+    ! REMPLISSAGE (VERROUILLAGE)
+    ! Une fois la première pièce entrée, on ignore le seuil et les quantités.
+    ! On complète le chargement uniquement avec le type mémorisé.
+    
+    IF VTypeLotEnCours = 1
+        PULL from StockCarton
+    ELSEIF VTypeLotEnCours = 2
+        PULL from StockPlastique
+    ELSE
+        PULL from StockOrganique
+    ENDIF
+ENDIF
+! Avant on utilisait : MOST PARTS StockCarton, StockPlastique, StockOrganique
+
+### Action en Entrée
+
+! Si c'est la première pièce du lot
+IF NParts (Chargement) = 1 
+	VTypeLotEnCours = TypeDechetE
+ENDIF
+!
+! Calcul du revenu généré par ce déchet spécifique
+! Formule : Poids du déchet (kg) * Prix au kg du type de déchet
+VRevenuTotal = VRevenuTotal + PoidsDechet * VTabPrixVente(TypeDechetE)
+
+### Action en Sortie
+
+! Si c'est la dernière pièce du lot (correspondant au seuil)
+IF M = VSeuilExpedition
+   VTypeLotEnCours = 0
+ENDIF
+
+### Loi de Sortie
+
+PUSH TO SHIP
+
+### Note
+
+Si on ajoute des postes à la machine de Chargement, il faut étendre la variable VTypeLotEnCours
+pour qu'il en existe une instance pour chaque machine (/ un index de liste)
