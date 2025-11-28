@@ -449,3 +449,31 @@ PUSH TO SHIP
 
 Si on ajoute des postes à la machine de Chargement, il faut étendre la variable VTypeLotEnCours
 pour qu'il en existe une instance pour chaque machine (/ un index de liste)
+
+### Stratégie de Maintenance des Équipements
+
+Afin de simuler les aléas techniques et la disponibilité des ressources humaines (les techniciens étant moins nombreux et ayant des plages horaires plus restreintes que les opérateurs), un système de pannes à deux niveaux a été configuré sur les machines critiques. Toutes les pannes sont définies sur la base du **Temps de Fonctionnement (Busy Time)**.
+
+**1. Machine de Tri : Pannes Mineures**
+*   **Fréquence :** Moyenne d'une panne toutes les 120 minutes (`NegExp(120)`).
+*   **Durée :** Intervention courte de 5 à 15 minutes (`Uniform(5, 15)`).
+*   **Gestion de la Ressource :** La réparation est assignée via la règle `TechnicienMaintenance OR OperateurTri`. Cette flexibilité est nécessaire pour éviter de bloquer la chaîne de tri : si l'équipe de maintenance est absente ou occupée, un opérateur de tri peut intervenir pour relancer la machine.
+
+**2. Incinérateur : Pannes Hybrides**
+L'incinérateur est soumis à deux types d'aléas distincts pour refléter sa complexité :
+*   **Pannes Mineures (Réglages courants) :**
+    *   **Fréquence :** Moyenne d'une panne toutes les 200 minutes (`NegExp(200)`).
+    *   **Durée :** 10 à 20 minutes (`Uniform(10, 20)`).
+    *   **Ressource :** Règle partagée `TechnicienMaintenance OR OperateurTri`. Les opérateurs peuvent effectuer ces réglages simples pour maintenir le flux si aucun technicien n'est disponible.
+*   **Pannes Majeures (Casse critique) :**
+    *   **Fréquence :** Événement rare, moyenne d'une fois toutes les 2000 minutes (`NegExp(2000)`).
+    *   **Durée :** Immobilisation lourde de 2 à 4 heures (`Uniform(120, 240)`).
+    *   **Ressource :** Exclusivement réservée au `TechnicienMaintenance`. Ces pannes nécessitent une compétence technique spécifique que les opérateurs ne possèdent pas.
+
+### Exclusion des Postes de Chargement et Déchargement
+
+Bien que le **Déchargement** (entrée des déchets) et le **Chargement** (expédition des matières premières) soient modélisés par des éléments "Machine" dans WITNESS, aucune panne ne leur a été attribuée.
+
+Cette décision se justifie par la nature de ces opérations :
+1.  **Déchargement :** Cet élément représente l'action du camion-poubelle déversant son contenu. Une "panne" ici signifierait une panne mécanique du camion lui-même. Or, les camions sont des entités externes ; leur indisponibilité est déjà simulée en amont par le profil d'arrivée variable (Arrival Profile).
+2.  **Chargement :** De la même manière, cet élément simule l'arrivée d'un transporteur logistique externe venant récupérer les palettes. L'infrastructure du quai de chargement (simple espace physique) a une probabilité de panne négligeable par rapport aux équipements industriels comme le trieur ou l'incinérateur.
